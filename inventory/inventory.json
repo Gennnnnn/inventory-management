@@ -1,0 +1,26 @@
+{
+    "Hammer": {
+        "price": 500,
+        "quantity": 0
+    },
+    "Screwdriver": {
+        "price": 300,
+        "quantity": 1
+    },
+    "Saw": {
+        "price": 700,
+        "quantity": 0
+    },
+    "Wood Planks": {
+        "price": 200,
+        "quantity": 0
+    },
+    "Nails (Box)": {
+        "price": 50,
+        "quantity": 0
+    },
+    "Varnish Can": {
+        "price": 150,
+        "quantity": 0
+    }
+}
