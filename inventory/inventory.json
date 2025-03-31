@@ -5,7 +5,7 @@
     },
     "Screwdriver": {
         "price": 300,
-        "quantity": 1
+        "quantity": 0
     },
     "Saw": {
         "price": 700,
