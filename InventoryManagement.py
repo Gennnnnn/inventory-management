@@ -7,7 +7,11 @@ import os
 import datetime
 import openpyxl
 
+# from firebase_config import db_ref
+
 class InventoryManagement:
+    """Manages inventory, tracks purchases, and handles UI interactions"""
+
     def __init__(self, root):
         """Initialize the inventory management application"""
         self.root = root
@@ -20,64 +24,65 @@ class InventoryManagement:
 
         # Define color palette
         self.colors = {
-            "bg": "#2b2b2b",
-            "btn": "#1f6aa5",
-            "text": "#ffffff"
+            "bg": "#2b2b2b",    # Background Color
+            "btn": "#1f6aa5",   # Button Color
+            "text": "#ffffff"   # Text Color
         }
 
-        self.quantity_vars = {}
-
-        # Define inventory directory
-        # self.inventory_dir = os.path.join(os.getcwd(), "inventory")
+        # Define inventory directory (ensure it exists)
         self.inventory_dir = Path.cwd() / "inventory"
-        self.inventory_dir.mkdir(exist_ok=True) # Creates directory if it doesn't exist
+        self.inventory_dir.mkdir(exist_ok=True) # Creates directory if missing
 
-        # Define file paths
-        self.json_file = self.inventory_dir / "inventory.json"
-        self.amount_file = self.inventory_dir / "amounts.json"
-        self.history_file = self.inventory_dir / "history.json"
-        self.export_dir = self.inventory_dir
-        
-        # Load or initialize inventory
-        self.inventory = self.load_inventory()
-      
-        # Dictionary to store item labels for updating
-        self.item_labels = {}
+        # Define file paths in a dictionary (easier management)
+        self.file_paths = {
+            "inventory": self.inventory_dir / "inventory.json",
+            "amounts": self.inventory_dir / "amounts.json",
+            "history": self.inventory_dir / "history.json",
+            "export": self.inventory_dir
+        }
 
-        # Build UI
-        self.create_ui()
+        self.inventory = self.load_inventory()  # Load or initialize inventory
+        self.item_labels = {}   # Dictionary to store item labels for updating
+        self.quantity_vars = {} # Quantity for each items
+        self.create_ui()    # Build UI
+            
                 
     def load_inventory(self):
         """Load inventory from JSON file or create a default one if it doesn't exist"""
-        json_path = self.json_file
+        json_path = self.file_paths["inventory"]
 
-        if json_path.exists():
-            with json_path.open("r") as file:
-                try:
+        try:
+            if json_path.exists():
+                with json_path.open("r") as file:
                     inventory = json.load(file)
+
                     # Ensure the inventory is always a dictionary
                     if not isinstance(inventory, dict):
                         raise ValueError("Invalid inventory format")
                     
-                    # Ensure allitems have a quantity field
+                    # Ensure all items have a quantity field
                     for item, data in inventory.items():
-                        if isinstance(data, int):
+                        if isinstance(data, int):   # Convert old format (integer) to new dict format
                             inventory[item] = {"price": 100, "quantity": data} 
-                        elif isinstance(data, dict) and "quantity" not in data:
-                            inventory[item]["quantity"] = 0
+                        # elif isinstance(data, dict) and "quantity" not in data:
+                        elif isinstance(data, dict):
+                            inventory[item]["quantity"] = data.get("quantity", 0)
+                            inventory[item]["price"] = data.get("price", 100)
+            else:
+                inventory = {}
 
-                except (json.JSONDecodeError, ValueError):
-                    CTkMessagebox(title="Error", message="Inventory file is corrupted or invalid. Resetting inventory", icon="cancel")
-                    inventory = {}
-        else:
+        except (json.JSONDecodeError, ValueError):
+            CTkMessagebox(
+                title="Error", 
+                message="Inventory file is corrupted or invalid. Resetting inventory", 
+                icon="cancel")
             inventory = {}
 
         # Reset all quantities to 0 on startup
         for item in inventory.values():
             item["quantity"] = 0
 
-        # Save the updated inventory with reset quantities
-        self.save_inventory(inventory)
+        self.save_inventory(inventory)  # Save the updated inventory with reset quantities
 
         return inventory
 
@@ -87,70 +92,105 @@ class InventoryManagement:
         if data is None:
             data = self.inventory
         
-        json_path = Path(self.json_file)
+        json_path = self.file_paths["inventory"]
 
         try:
-            json_path.write_text(json.dumps(data, indent=4))
+            json_path.parent.mkdir(parents=True, exist_ok=True) # Ensure directory exists before saving
+
+            # Write to file safely with utf-8 encoding
+            with json_path.open("w", encoding="utf-8") as file:
+                json.dump(data, file, indent=4)
+
         except (OSError, IOError) as e:
-            CTkMessagebox(title="Error", message=f"Failed to save inventory: {e}", icon="cancel")
+            CTkMessagebox(
+                title="Error", 
+                message=f"Failed to save inventory: {e}", 
+                icon="cancel")
+
 
     def create_ui(self):
         """Create the user interface"""
-        # Title CTkLabel
+        # Title Label
         title_label = ctk.CTkLabel(self.root, text="Inventory Management", 
                                    font=("Arial", 24, "bold"), text_color=self.colors["text"])
         title_label.pack(pady=20)
 
-        # Load the saved total from JSON
-        saved_data = self.load_amount_data()
-        saved_total = saved_data.get("total", 0)
+        saved_total = self.load_amount_data().get("total", 0)   # Load the saved total from JSON
         
-        # Total Amount CTkLabel (Top Left)
-        self.total_label = ctk.CTkLabel(self.root, text=f"Total: ₱ {saved_total}", font=("Arial", 18, "bold"))
+        # Total Amount Label (Top Left)
+        self.total_label = ctk.CTkLabel(self.root, text=f"Total: ₱ {saved_total}", 
+                                        font=("Arial", 18, "bold"))
         self.total_label.place(x=20, y=20)
 
-        # Reset CTkButton
-        btn_reset_total = ctk.CTkButton(self.root, text="Reset Total", font=("Arial", 16),
-                                    fg_color=self.colors["btn"], command=self.reset_total,
-                                    width=140, height=40)
-        btn_reset_total.place(x=200, y=15)
+        self.create_button("Reset Total", self.reset_total, x=200, y=15, width=140, height=40)  # Reset Button
 
         # Create the scrollable inventory area
         self.create_scrollable_inventory()
-
         self.populate_inventory()
 
-        # Create a frame for the buttons at the bottom right
-        button_frame = ctk.CTkFrame(self.root, fg_color="#242424")
+        # Bottom-right button frame
+        button_frame = ctk.CTkFrame(self.root, fg_color=self.colors["bg"])
         button_frame.pack(side="bottom", anchor="se", padx=20, pady=20)
 
-        # History CTkButton
-        btn_history = ctk.CTkButton(self.root, text="View History", font=("Arial", 16), 
-                                fg_color=self.colors["btn"], command=self.open_history_window,
+        # Add Buttons
+        btn_history = ctk.CTkButton(self.root, text="View History", font=("Arial", 16, "bold"), fg_color=self.colors["btn"],
+                                command=self.open_history_window,
                                 width=140, height=50)
-        btn_history.pack(pady=20)
+        btn_history.pack(padx=5, pady=5)
 
-        # Exit button
-        exit_btn = ctk.CTkButton(button_frame, text="Exit", font=("Arial", 16, "bold"),
-                            fg_color=self.colors["btn"], command=self.confirm_exit,
-                            width=140, height=50, corner_radius=10, border_color="white")
-        exit_btn.pack(side="right", padx=10, pady=10)
+        self.create_button("Exit", self.confirm_exit, frame=button_frame, width=140, height=50)
+        self.create_button("Export History", self.export_history_to_excel, frame=button_frame, width=180, height=50)
 
-        # Export button
-        export_btn = ctk.CTkButton(button_frame, text="Export History", font=("Arial", 16, "bold"),
-                               fg_color=self.colors["btn"], command=self.export_history_to_excel,
-                               width=180, height=50, corner_radius=10, border_color="white")
-        export_btn.pack(side="right", padx=10, pady=10)
+
+    def create_button(self, text, command, x=None, y=None, frame=None, width= 140, height=50):
+        """Creates a CTkButton with predefined styling"""
+        btn = ctk.CTkButton(
+            frame or self.root,
+            text=text,
+            font=("Arial", 16, "bold"),
+            fg_color=self.colors["btn"],
+            command=command,
+            width=width,
+            height=height,
+            corner_radius=10,
+            border_color="white"
+        )
+
+        if x is not None and y is not None:
+            btn.place(x=x, y=y)
+        else:
+            btn.pack(side="right", padx=10, pady=10)
+        
+        return btn
+    
 
     def confirm_exit(self):
         """Ask for confirmation before exiting the application"""
-        response = CTkMessagebox(title="Exit Confirmation", message="Are you sure you want to exit?", icon="question", option_1="Yes", option_2="No")
+        response = CTkMessagebox(
+            title="Exit Confirmation", 
+            message="Are you sure you want to exit?", 
+            icon="question", 
+            option_1="Yes", 
+            option_2="No")
+        
         if response.get() == "Yes":
             self.root.destroy()
         
+        
     def update_quantity(self, item, qty_var, change):
-        """Update the selected quantity"""
-        current_qty = qty_var.get()
+        """Increase or decrease the quantity of an inventory item"""
+
+        try:
+            current_qty = int(qty_var.get())    # Ensure it's an integer
+        except (ValueError, TypeError):
+            CTkMessagebox(
+                title="Error",
+                message=f"Invalid quantity value for {item}. Resetting to 0",
+                icon="cancel"
+            )
+            qty_var.set(0)
+            return
+
         new_qty = max(0, current_qty + change)
 
         # Only update if quantity actually changes
@@ -158,31 +198,54 @@ class InventoryManagement:
             return
         
         qty_var.set(new_qty)
-        self.inventory[item]["quantity"] = new_qty
-        self.save_inventory()
+        
+        # Ensure item exists in inventory before updating
+        if item in self.inventory:
+            self.inventory[item]["quantity"] = new_qty
+            self.save_inventory()
 
-        # If there's a UI label showing quantity, update it here
-        if item in self.item_labels:
-            self.item_labels[item].configure(text=f"Qty: {new_qty}")
+            # Update UI label if it exists
+            if item in self.item_labels:
+                self.item_labels[item].configure(text=f"Qty: {new_qty}")
+        else:
+            CTkMessagebox(
+                title="Error",
+                message=f"Item '{item}' not found in inventory",
+                icon="cancel"
+            )
+
 
     def export_history_to_excel(self):
-        """Export history data to an excel File formatted correctly"""
+        """Export history data to an Excel File formatted correctly"""
         now = datetime.datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
-        excel_file = os.path.join(self.export_dir, f"history_{now}.xlsx")
+        excel_file = os.path.join(self.file_paths["export"], f"history_{now}.xlsx")
 
-        # Ensure export directory exists
-        os.makedirs(self.export_dir, exist_ok=True)
+        os.makedirs(self.file_paths["export"], exist_ok=True)   # Ensure export directory exists
         
         # Check if history file exists
-        if not os.path.exists(self.history_file):
-            CTkMessagebox(title="Error", message="No history data found to export", icon="cancel")
+        if not os.path.exists(self.file_paths["history"]):
+            CTkMessagebox(
+                title="Error", 
+                message="No history data found to export", 
+                icon="cancel")
             return
         
+        # Load history data
         try:
-            with open(self.history_file, "r") as file:
+            with open(self.file_paths["history"], "r") as file:
                 history_data = json.load(file)
+                if not history_data:
+                    CTkMessagebox(
+                        title="Error",
+                        message="History file is empty. Nothing to export",
+                        icon="cancel"
+                    )
+                    return
         except json.JSONDecodeError:
-            CTkMessagebox(title="Error", message="History file is corrupted or invalid", icon="cancel")
+            CTkMessagebox(
+                title="Error", 
+                message="History file is corrupted or invalid", 
+                icon="cancel")
             return
 
         # Create an Excel Workbook
@@ -194,6 +257,7 @@ class InventoryManagement:
         headers = ["Date", "Quantity", "Product", "Cost", "Total"]
         ws.append(headers)
 
+        # Make headers bold
         for col_num, header in enumerate(headers, 1):
             ws.cell(row=1, column=col_num).font = openpyxl.styles.Font(bold=True)
 
@@ -203,11 +267,15 @@ class InventoryManagement:
             ws.append([date, "", "", "", ""])
 
             for entry in transactions:
+                quantity = entry.get("quantity", 0)
+                item_name = entry.get("item", "Unknown Item")
                 fixed_price = self.inventory.get(entry["item"], {}).get("price", "N/A")
-                ws.append(["", entry["quantity"], entry["item"], f"₱ {fixed_price}", f"₱ {entry['total']}"])
+                total_cost = entry.get("total", "N/A")
+
+                ws.append(["", quantity, item_name, f"₱ {fixed_price}", f"₱ {total_cost}"])
             
             row_num += len(transactions) + 1
-            ws.append([""])
+            ws.append([""]) # Blank row for separation
 
         # Auto adjust columns widths
         for col in ws.columns:
@@ -217,30 +285,40 @@ class InventoryManagement:
         # Save the Excel File
         try:
             wb.save(excel_file)
-            CTkMessagebox(title="Export Successful", message=f"History exported to\n{excel_file}", icon="info")
-            os.startfile(self.export_dir)
+            CTkMessagebox(
+                title="Export Successful", 
+                message=f"History exported to\n{excel_file}", 
+                icon="info")
+            os.startfile(self.file_paths["export"])   # Open the export directory
         except Exception as e:
-            CTkMessagebox(title="Export Error", message=f"Failed to save Excel file.\nError: {str(e)}", icon="cancel")
+            CTkMessagebox(
+                title="Export Error", 
+                message=f"Failed to save Excel file.\nError: {str(e)}", 
+                icon="cancel")
+
 
     def create_scrollable_inventory(self):
         """Create a scrollable inventory grid with images, names, and buttons"""
-
         # Create a Scrollable Frame
         self.scroll_frame = ctk.CTkScrollableFrame(self.root, fg_color=self.colors["bg"])
         self.scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
+        # Create a parent frame to center the inventory grid
+        # self.center_frame = ctk.CTkFrame(self.scroll_frame, fg_color=self.colors["bg"])
+        # self.center_frame.pack(pady=10) # Keep the frame positioned properly
+
         # Configure the scroll frame
         for col in range(7):
-            self.scroll_frame.grid_columnconfigure(0, weight=1)
+            self.scroll_frame.grid_columnconfigure(col, weight=1)
+                
                     
     def populate_inventory(self):
         """Populate the inventory grid inside the scrollable frame"""
-
         def round_corners(image, size=(280, 280), radius=30):
             """Load an image (or use provided PIL image), resize it, and apply rounded corners"""
             if isinstance(image, str):  # If image is a file path
                 img = Image.open(image).convert("RGBA")
-            else:  # If image is already a PIL image (placeholder)
+            else:   # If image is already a PIL image (placeholder)
                 img = image.convert("RGBA")
 
             img = img.resize(size, Image.LANCZOS)
@@ -261,7 +339,7 @@ class InventoryManagement:
 
         # Center the grid using a parent frame
         center_frame = ctk.CTkFrame(self.scroll_frame, fg_color=self.colors["bg"])
-        center_frame.pack(padx=50)
+        center_frame.grid(row=0, column=0, sticky="nsew", padx=50, pady=10)
 
         # Configure column weights for even spacing
         for i in range(columns):
@@ -283,12 +361,10 @@ class InventoryManagement:
 
             # Load Image
             image_path = os.path.join("assets", f"{item.lower().replace(' ', '_')}.jpg")
-            if os.path.exists(image_path):
-                rounded_img = round_corners(image_path)
-            else:
-                # Create a blank image (solid color) if no image is found
-                placeholder = Image.new("RGB", (280, 280), color=(200, 200, 200))  # Light gray
-                rounded_img = round_corners(placeholder)  # Now correctly processes PIL images
+
+            # Create a blank image (solid color) if no image is found
+            placeholder = Image.new("RGB", (280, 280), color=(200, 200, 200))  # Light gray
+            rounded_img = round_corners(image_path) if os.path.exists(image_path) else placeholder
             
             img = ctk.CTkImage(light_image=rounded_img, size=(280, 280))
 
@@ -336,9 +412,9 @@ class InventoryManagement:
                 col = 0
                 row += 1
 
-                               
+
     def add_amount(self, item, qty_var):
-        """Save thhe calculated amount (price x quantity) to JSON and log history"""
+        """Save the calculated amount (price x quantity) to JSON and log history"""
         quantity = qty_var.get()
 
         if quantity == 0:
@@ -378,31 +454,23 @@ class InventoryManagement:
         # self.update_ui()
 
         # Saved updated inventory
-        with open(self.json_file, "w") as file:
+        with open(self.file_paths["inventory"], "w") as file:
             json.dump(self.inventory, file, indent=4)
 
-    # def update_ui(self):
-    #     """Refresh UI elements after inventory updates"""
-    #     for item, label in self.item_labels.items():
-    #         label.configure(text=f"{item}: {self.inventory[item]['quantity']}")
-
-    #     self.total_label.configure(text=f"Total: ₱ {self.calculate_total()}")
-
-    # def calculate_total(self):
-    #     """Calculate the total price of all items in inventory"""
-    #     total = sum(item["quantity"] * item.get("price", 0) for item in self.inventory.values())
-    #     return total
 
     def log_purchase(self, item, quantity, total_amount):
         """Log each purchase in history.json under the correct date"""
         today = datetime.datetime.now().strftime("%B %d, %Y")
 
-        # Load existing history or create new
         history_data = {}
-        if os.path.exists(self.history_file):
+
+        # Check if the history file exists and load existing data;
+        if self.file_paths["history"].exists():
             try:
-                with open(self.history_file, "r") as file:
+                with open(self.file_paths["history"], "r") as file:
                     history_data = json.load(file)
+                    if not isinstance(history_data, dict):
+                        raise ValueError("Invalid history file format")
             except (json.JSONDecodeError, ValueError):
                 history_data = {}
 
@@ -413,33 +481,53 @@ class InventoryManagement:
             "total": total_amount
         })
 
-        # Save updated history
-        with open(self.history_file, "w") as file:
-            json.dump(history_data, file, indent=4)
+        # Save the updated history with error handling
+        try:
+            with open(self.file_paths["history"], "w") as file:
+                json.dump(history_data, file, indent=4)
+        except (OSError, IOError) as e:
+            CTkMessagebox(
+                title="Error",
+                message=f"Failed to save history: {e}",
+                icon="cancel"
+            )
+    
     
     def load_amount_data(self):
         """Load previous spending data from JSON"""
-        if os.path.exists(self.amount_file):
+        if self.file_paths["amounts"]:
             try:
-                with open(self.amount_file, "r") as file:
-                    return json.load(file)
+                with open(self.file_paths["amounts"], "r") as file:
+                    data = json.load(file)
+                    if not isinstance(data, dict) or "total" not in data or "entries" not in data:
+                        raise ValueError("Invalid amount file format")
+                    return data
             except (json.JSONDecodeError, ValueError):
-                pass
+                CTkMessagebox(
+                    title="Error",
+                    message="Amount file is corrupted. Resetting data",
+                    icon="cancel"
+                )
         
-        # Create default JSON structrue if file doesn't exist
+        # Return a default structure if file is missing or corrupted
         return {"total": 0, "entries": []}
+
 
     def save_amount_data(self, data):
         """Save spending data to JSON"""
-        temp_file = self.amount_file.with_suffix(".tmp")
+        temp_file = self.file_paths["amounts"].with_suffix(".tmp")
 
         try:
-            with temp_file.open("w") as file:
+            with temp_file.open("w", encoding="utf-8") as file:
                 json.dump(data, file, indent=4)
-            # os.replace(temp_file, self.amount_file)
-            temp_file.replace(self.amount_file)
+
+            temp_file.replace(self.file_paths["amounts"])   # Replace the original file with the temp file
         except (OSError, IOError) as e:
-            CTkMessagebox(title="Error", message=f"Failed to save data: {e}", icon="cancel")
+            CTkMessagebox(
+                title="Error", 
+                message=f"Failed to save data: {e}", 
+                icon="cancel")
+
 
     def open_history_window(self):
         """Open a new window showing purchase history"""
@@ -451,11 +539,21 @@ class InventoryManagement:
             return
 
         # Load history data
-        if os.path.exists(self.history_file):
-            with open(self.history_file, "r") as file:
-                history_data = json.load(file)
+        history_data = {}
+        if os.path.exists(self.file_paths["history"]):
+            try:
+                with open(self.file_paths["history"], "r") as file:
+                    history_data = json.load(file)
+            except (json.JSONDecodeError, ValueError):
+                CTkMessagebox(title="Error",
+                              message="History file is corrupted.",
+                              icon="cancel")
+                return
         else:
-            CTkMessagebox(title="Error", message="No history data found", icon="cancel")
+            CTkMessagebox(
+                title="Error", 
+                message="No history data found", 
+                icon="cancel")
             return
 
         # Create new window
@@ -514,41 +612,68 @@ class InventoryManagement:
                                      width=140, height=40)
         reset_button.pack(pady=10)
 
+
     def reset_history(self, history_window):
         """Manually reset the history.json file"""
-        response = CTkMessagebox(title="Confirm Reset", message="Are you sure you want to reset the history?", icon="question", option_1="Yes", option_2="No")
-        if response.get() == "No":
+
+        response = CTkMessagebox(
+            title="Confirm Reset",
+            message="Are you sure you want to reset the history?", 
+            icon="question", 
+            option_1="Yes", 
+            option_2="No"
+            ).get()
+        if response != "Yes":
             return
 
         # Clear history file
-        with open(self.history_file, "w") as file:
-            json.dump({}, file, indent=4)
+        try:
+            with open(self.file_paths["history"], "w") as file:
+                json.dump({}, file, indent=4)
 
-        # Reset stored total amount
-        reset_data = {"total": 0, "entries": []}
-        self.save_amount_data(reset_data)
+            # Reset stored total amount
+            reset_data = {"total": 0, "entries": []}
+            self.save_amount_data(reset_data)
 
-        # Update total label if it exists
-        if hasattr(self, "total_label"):
-            self.total_label.configure(text="Total: ₱ 0")
+            # Update total label if it exists
+            if hasattr(self, "total_label"):
+                self.total_label.configure(text="Total: ₱ 0")
 
-        CTkMessagebox(title="Reset Successful", message="History and Total have been cleared", icon="info")
+            CTkMessagebox(
+                title="Reset Successful", 
+                message="History and Total have been cleared", 
+                icon="info")
 
-        # Clear all widgets in the history window before repopulating
-        for widget in history_window.winfo_children():
-            widget.destroy()
+            # Clear all widgets in the history window before repopulating
+            for widget in history_window.winfo_children():
+                widget.destroy()
+
+            # Repopulate the history window with an empty message
+            empty_label = ctk.CTkLabel(history_window, text="No transaction history available", font=("Arial", 18), text_color="white")
+            empty_label.pack(pady=20)
+        except (OSError, IOError) as e:
+            CTkMessagebox(
+                title="Error",
+                message=f"Failed to reset history: {e}",
+                icon="cancel"
+            )
                 
-        self.populate_history_ui(history_window)
 
     def populate_history_ui(self, history_window):
         """Repopulate the history window after resetting"""
 
+        # Clear existing widgets in history window before repopulating
+        for widget in history_window.winfo_children():
+            widget.destroy()
+
         # Load history data
-        if os.path.exists(self.history_file):
-            with open(self.history_file, "r") as file:
-                history_data = json.load(file)
-        else:
-            history_data = {}
+        history_window = {}
+        if os.path.exists(self.file_paths["history"]):
+            try:
+                with open(self.file_paths["history"], "r") as file:
+                    history_data = json.load(file)
+            except (json.JSONDecodeError, ValueError):
+                history_data = {}
 
         # Title
         title_label = ctk.CTkLabel(history_window, text="Transaction History", font=("Arial", 20, "bold"))
@@ -590,11 +715,19 @@ class InventoryManagement:
                                      width=140, height=40)
         reset_button.pack(pady=10)
         
+        
     def reset_total(self):
         """Reset the total amount spent back to 0 in amounts.json"""
-        response = CTkMessagebox(title="Confirm Reset", message="Are you sure you want to reset the total amount?", icon="question", option_1="Yes", option_2="No")
 
-        if response.get() == "Yes":
+        response = CTkMessagebox(
+            title="Confirm Reset", 
+            message="Are you sure you want to reset the total amount?",
+            icon="question",
+            option_1="Yes", 
+            option_2="No"
+            ).get()
+
+        if response == "Yes":
             try:
                 # Reset total and clear entries
                 reset_data = {"total": 0, "entries": []}
@@ -610,8 +743,10 @@ class InventoryManagement:
             except Exception as e:
                 CTkMessagebox(title="Error", message=f"Failed to reset total amount: {str(e)}", icon="cancel")
             
+            
 # Run the application
 if __name__ == "__main__":
+    # Initialize the main application window
     root = ctk.CTk()
-    app = InventoryManagement(root)
-    root.mainloop()
+    app = InventoryManagement(root) # Create an instance of InventoryManagement
+    root.mainloop() # Run the application
