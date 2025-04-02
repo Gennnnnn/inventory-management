@@ -1,26 +1,32 @@
 {
+    "CON": {
+        "image": "assets/os.path.basename(file_path)",
+        "name": "CON",
+        "price": 2323.0,
+        "quantity": 0
+    },
     "Hammer": {
+        "image": "assets/hammer.jpg",
+        "name": "Hammer",
         "price": 500,
         "quantity": 0
     },
-    "Screwdriver": {
-        "price": 300,
-        "quantity": 0
-    },
     "Saw": {
-        "price": 700,
+        "image": "assets/hammer.jpg",
+        "name": "Saw",
+        "price": 300.0,
         "quantity": 0
     },
-    "Wood Planks": {
-        "price": 200,
+    "Screwdriver": {
+        "image": "assets\\hammer.jpg",
+        "name": "Screwdriver",
+        "price": 787.0,
         "quantity": 0
     },
-    "Nails (Box)": {
-        "price": 50,
-        "quantity": 0
-    },
-    "Varnish Can": {
-        "price": 150,
+    "gen": {
+        "image": "assets/screwdriver.jpg",
+        "name": "gen",
+        "price": 23.0,
         "quantity": 0
     }
 }

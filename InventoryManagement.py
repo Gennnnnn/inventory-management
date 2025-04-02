@@ -1,16 +1,25 @@
 import customtkinter as ctk
-from CTkMessagebox import CTkMessagebox
-from PIL import Image, ImageDraw, ImageOps
 import json
-from pathlib import Path
 import os
 import datetime
 import openpyxl
+import shutil
 
-# from firebase_config import db_ref
+from CTkMessagebox import CTkMessagebox
+from PIL import Image, ImageDraw, ImageOps
+from pathlib import Path
+from customtkinter import filedialog
+
 
 class InventoryManagement:
     """Manages inventory, tracks purchases, and handles UI interactions"""
+
+    def refresh_inventory_from_firebase(self):
+        """Refresh the inventory from the local JSON file after a Firebase update"""
+        self.inventory = self.load_inventory()
+        self.refresh_inventory_display()
+        print("🔄 Inventory updated from Firebase")
+    
 
     def __init__(self, root):
         """Initialize the inventory management application"""
@@ -129,7 +138,7 @@ class InventoryManagement:
         self.populate_inventory()
 
         # Bottom-right button frame
-        button_frame = ctk.CTkFrame(self.root, fg_color=self.colors["bg"])
+        button_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         button_frame.pack(side="bottom", anchor="se", padx=20, pady=20)
 
         # Add Buttons
@@ -141,6 +150,293 @@ class InventoryManagement:
         self.create_button("Exit", self.confirm_exit, frame=button_frame, width=140, height=50)
         self.create_button("Export History", self.export_history_to_excel, frame=button_frame, width=180, height=50)
 
+        add_button = ctk.CTkButton(master=self.root, font=("Arial", 18), text="➕ Add", width=140, height=50, command=self.create_add_window)
+        add_button.place(x=1430, y=10)   
+
+        edit_button = ctk.CTkButton(master=self.root, font=("Arial", 18), text="✏️ Edit", width=140, height=50, command=self.create_edit_window)
+        edit_button.place(x=1590, y=10)   
+
+        remove_button = ctk.CTkButton(master=self.root, font=("Arial", 18), text="❌ Remove", width=140, height=50, command=self.create_remove_window)
+        remove_button.place(x=1750, y=10)
+
+
+    def create_add_window(self):
+        add_window = ctk.CTkToplevel(self.root)
+        add_window.title("Add Equipment")
+        add_window.geometry("400x400")
+        add_window.attributes("-topmost", True)
+
+        # Center the window dynamically
+        add_window.update_idletasks()
+        window_width, window_height = 400, 400
+        screen_width = add_window.winfo_screenwidth()
+        screen_height = add_window.winfo_screenheight()
+        x_position = (screen_width // 2) - (window_width // 2)
+        y_position = (screen_height // 2) - (window_height // 2)
+        add_window.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+
+        # Name Entry
+        name_label = ctk.CTkLabel(add_window, text="Name:", font=("Arial", 16))
+        name_label.pack(pady=5)
+        name_entry = ctk.CTkEntry(add_window)
+        name_entry.pack(pady=(5, 20))
+
+        # Image Upload Button
+        image_path = ctk.StringVar()
+
+        def select_image():
+            file_path = filedialog.askopenfilename(
+                title="Select Image",
+                filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.gif")]
+            )
+            if file_path:
+                # Copy the selected image to the assets folder
+                destination = f"assets/{file_path.split('/')[-1]}"
+                shutil.copy(file_path, destination)
+                image_path.set(destination) # Update path to the copied location
+                image_label.configure(text=file_path.split("/")[-1])    # Show the file name
+        
+        image_button = ctk.CTkButton(add_window, text="Upload Image", font=("Arial", 16), command=select_image)
+        image_button.pack(pady=(15, 5))
+
+        image_label = ctk.CTkLabel(add_window, text="No file selected", font=("Arial", 14))
+        image_label.pack(pady=(5, 15))
+
+        # Price Entry
+        price_label =ctk.CTkLabel(add_window, text="Price:", font=("Arial", 16))
+        price_label.pack(pady=5)
+        price_entry = ctk.CTkEntry(add_window)
+        price_entry.pack(pady=5)
+
+        # Save Button
+        save_button = ctk.CTkButton(add_window, text="Save", font=("Arial", 18), command=lambda: self.add_equipment(name_entry.get(), image_path.get(), price_entry.get(), add_window))
+        save_button.pack(pady=40)
+
+        # Cancel Button
+        # cancel_button = ctk.CTkButton(add_window, text="Cancel", font=("Arial", 18))
+        # cancel_button.pack(pady=40)
+        
+        
+    def create_edit_window(self):
+        edit_window = ctk.CTkToplevel(self.root)
+        edit_window.title("Edit Equipment")
+        edit_window.geometry("400x420")
+        edit_window.attributes("-topmost", True)
+
+        # Center the window dynamically
+        edit_window.update_idletasks()
+        window_width, window_height = 400, 420
+        screen_width = edit_window.winfo_screenwidth()
+        screen_height = edit_window.winfo_screenheight()
+        x_position = (screen_width // 2) - (window_width // 2)
+        y_position = (screen_height // 2) - (window_height // 2)
+        edit_window.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+
+
+        # Dropdown to select equipment
+        name_label = ctk.CTkLabel(edit_window, text="Select Equipment:", font=("Arial", 16))
+        name_label.pack(pady=5)
+
+        equipment_names = list(self.inventory.keys())
+        selected_name = ctk.StringVar(value=equipment_names[0] if equipment_names else "")
+
+        dropdown = ctk.CTkOptionMenu(edit_window, variable=selected_name, values=equipment_names)
+        dropdown.pack(pady=5)
+
+        # Prefill Fields with Selected Equipment Data
+        image_path = ctk.StringVar()
+        new_name_var = ctk.StringVar()
+        new_price_var = ctk.StringVar()
+
+        def update_fileds(*args):
+            """Updates the input fields based on the selected equipment"""
+            selected_item = selected_name.get()
+            if selected_item and selected_item in self.inventory:
+                data = self.inventory[selected_item]
+                new_name_var.set(selected_item)
+                new_price_var.set(str(data.get("price", "")))
+                image_path.set(data.get("image", ""))
+
+                # Update Image Label
+                image_label.configure(text=os.path.basename(image_path.get()) if image_path.get() else "No file selected")
+
+        selected_name.trace_add("write", update_fileds)
+
+        # New Name Entry (Prefilled)
+        new_name_label = ctk.CTkLabel(edit_window, text="New Name:", font=("Arial", 16))
+        new_name_label.pack(pady=5)
+        new_name_entry = ctk.CTkEntry(edit_window, textvariable=new_name_var)
+        new_name_entry.pack(pady=(5, 20))
+
+        def select_image():
+            file_path = filedialog.askopenfilename(
+                title="Select Image",
+                filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.gif")]
+            )
+            if file_path:
+                destination = os.path.join("assets", os.path.basename(file_path))
+
+                try:
+                    shutil.copy(file_path, destination)  # Copy image to assets
+
+                    image_path.set(destination)  # Store image path
+                    image_label.configure(text=os.path.basename(file_path))  # Update UI
+                except Exception as e:
+                    print(f"Error copying file: {e}")  # Debugging error
+
+                
+        image_button = ctk.CTkButton(edit_window, text="Upload Image", font=("Arial", 16), command=select_image)
+        image_button.pack(pady=(15, 5))
+
+        image_label = ctk.CTkLabel(edit_window, text="No file selected", font=("Arial", 16))
+        image_label.pack(pady=(5, 15))
+        
+        # New Price Entry
+        new_price_label = ctk.CTkLabel(edit_window, text="New Price:", font=("Arial", 16))
+        new_price_label.pack(pady=5)
+        new_price_entry = ctk.CTkEntry(edit_window, textvariable=new_price_var)
+        new_price_entry.pack(pady=5)
+
+        # Save Changes
+        def save_changes():
+            name = selected_name.get()
+            new_name = new_name_var.get().strip()
+            new_price = new_price_var.get().strip()
+            new_image = image_path.get()
+
+            if not new_name:
+                CTkMessagebox(title="Error", message="Name cannot be empty!", icon="cancel")
+                return
+
+            try:
+                new_price = float(new_price)
+            except ValueError:
+                CTkMessagebox(title="Error", message="Invalid price! Enter a valid number (e.g., 10.5).", icon="cancel")
+                return
+
+            if name:
+                if new_name and new_name != name:
+                    self.inventory[new_name] = self.inventory.pop(name)
+
+                self.inventory[new_name]["price"] = new_price
+
+                if new_image:
+                    self.inventory[new_name]["image"] = new_image
+                else:
+                    # Retain old image if not changed
+                    self.inventory[new_name]["image"] = self.inventory[new_name].get("image", "")
+
+                self.save_inventory()
+                self.refresh_inventory_display()
+                edit_window.destroy()
+                CTkMessagebox(title="Success", message=f"Equipment {new_name} updated successfully", icon="info")
+
+
+        save_button = ctk.CTkButton(edit_window, text="Update", font=("Arial", 18), command=save_changes)
+        save_button.pack(pady=20)
+
+        # Trigger field update on open
+        update_fileds()
+    
+    def create_remove_window(self):
+        remove_window = ctk.CTkToplevel(self.root)
+        remove_window.title("Remove Equipment")
+        remove_window.geometry("300x300")
+        remove_window.attributes("-topmost", True)
+        
+        # Center the window dynamically
+        remove_window.update_idletasks()
+        window_width, window_height = 300, 300
+        screen_width = remove_window.winfo_screenwidth()
+        screen_height = remove_window.winfo_screenheight()
+        x_position = (screen_width // 2) - (window_width // 2)
+        y_position = (screen_height // 2) - (window_height // 2)
+        remove_window.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+
+        # Dropdown Menu
+        equipment_names = list(self.inventory.keys())
+        selected_item = ctk.StringVar()
+        dropdown = ctk.CTkComboBox(remove_window, values=equipment_names, variable=selected_item)
+        dropdown.pack(pady=(100, 20))
+
+        # Remove Button
+        remove_button = ctk.CTkButton(remove_window, text="Remove", font=("Arial", 18), command=lambda: self.remove_equipment(selected_item.get(), remove_window))
+        remove_button.pack(pady=20)
+        
+    
+    def add_equipment(self, name, image_path, price, window):
+        if not name or not image_path or not price.isdigit():
+            CTkMessagebox(
+                title="Invalid Input",
+                message="Please fill all fields correctly!",
+                icon="cancel"
+            )
+            return
+        
+        new_item = {
+            "name": name,
+            "image": image_path,
+            "price": float(price),
+            "quantity": 0
+        }
+        
+        self.inventory[name.lower()] = new_item
+        self.save_inventory()
+        window.destroy()
+        self.refresh_inventory_display()
+        CTkMessagebox(
+            title="Success",
+            message=f"{name} added successfully!",
+            icon="info"
+        )
+
+
+    def remove_equipment(self, item_name, remove_window):
+        """Safely remove an item from the inventory"""
+        # Confirmation Dialog
+        confirm = CTkMessagebox(
+            title="Confirm",
+            message=f"Are you sure you want to remove '{item_name}'?",
+            icon="question",
+            option_1="Yes",
+            option_2="No"
+        ).get()
+        if confirm != "Yes":
+            return
+
+        inventory_keys = {k.lower(): k for k in self.inventory.keys()}  # Map lowercase to original keys
+        item_name_lower = item_name.lower()
+
+        if item_name_lower in inventory_keys:
+            original_name = inventory_keys[item_name_lower] # Get the actual key from the inventory
+            del self.inventory[original_name]   # Remove item
+            
+            # Save updated inventory
+            with open(self.file_paths["inventory"], "w") as file:
+                json.dump(self.inventory, file, indent=4)
+
+            self.refresh_inventory_display()
+            CTkMessagebox(
+                title="Success",
+                message=f"{item_name} removed successfully!",
+                icon="info"
+            )
+        else:
+            CTkMessagebox(
+                title="Error", 
+                message=f"'{item_name}' not found in inventory.", 
+                icon="cancel"
+                )
+        remove_window.destroy()
+        
+            
+    def refresh_inventory_display(self):
+        """Refresh the inventory display using the scrollable frame"""
+        if hasattr(self, "scroll_frame"):
+            for widget in self.scroll_frame.winfo_children():
+                widget.destroy()
+            self.populate_inventory()   # Reload inventory items
+   
 
     def create_button(self, text, command, x=None, y=None, frame=None, width= 140, height=50):
         """Creates a CTkButton with predefined styling"""
@@ -303,17 +599,16 @@ class InventoryManagement:
         self.scroll_frame = ctk.CTkScrollableFrame(self.root, fg_color=self.colors["bg"])
         self.scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Create a parent frame to center the inventory grid
-        # self.center_frame = ctk.CTkFrame(self.scroll_frame, fg_color=self.colors["bg"])
-        # self.center_frame.pack(pady=10) # Keep the frame positioned properly
+        inner_frame = self.scroll_frame._parent_canvas  # This access the actual inner frame
 
         # Configure the scroll frame
         for col in range(7):
-            self.scroll_frame.grid_columnconfigure(col, weight=1)
+            inner_frame.grid_columnconfigure(col, weight=1)
                 
                     
     def populate_inventory(self):
         """Populate the inventory grid inside the scrollable frame"""
+
         def round_corners(image, size=(280, 280), radius=30):
             """Load an image (or use provided PIL image), resize it, and apply rounded corners"""
             if isinstance(image, str):  # If image is a file path
@@ -334,16 +629,21 @@ class InventoryManagement:
 
             return rounded
 
-        columns = 7
+        columns = 5
         row, col = 0, 0
 
         # Center the grid using a parent frame
         center_frame = ctk.CTkFrame(self.scroll_frame, fg_color=self.colors["bg"])
-        center_frame.grid(row=0, column=0, sticky="nsew", padx=50, pady=10)
+        center_frame.pack(expand=True, fill="both")
 
         # Configure column weights for even spacing
         for i in range(columns):
             center_frame.grid_columnconfigure(i, weight=1)
+
+        # Loop through inventory items
+        # for index, (item, data) in enumerate(self.inventory.items()):
+        #     row = index // columns
+        #     col = index % columns
 
         for item, data in self.inventory.items():            
             # Handle cases where data is just an integer
@@ -360,7 +660,8 @@ class InventoryManagement:
             image_container.pack(padx=10, pady=10)
 
             # Load Image
-            image_path = os.path.join("assets", f"{item.lower().replace(' ', '_')}.jpg")
+            # image_path = os.path.join("assets", f"{item.lower().replace(' ', '_')}.jpg")
+            image_path = self.inventory[item].get("image", "")
 
             # Create a blank image (solid color) if no image is found
             placeholder = Image.new("RGB", (280, 280), color=(200, 200, 200))  # Light gray
@@ -743,10 +1044,10 @@ class InventoryManagement:
             except Exception as e:
                 CTkMessagebox(title="Error", message=f"Failed to reset total amount: {str(e)}", icon="cancel")
             
-            
-# Run the application
-if __name__ == "__main__":
-    # Initialize the main application window
-    root = ctk.CTk()
-    app = InventoryManagement(root) # Create an instance of InventoryManagement
-    root.mainloop() # Run the application
+
+# # Run the application
+# if __name__ == "__main__":
+#     # Initialize the main application window
+#     root = ctk.CTk()
+#     app = InventoryManagement(root) # Create an instance of InventoryManagement
+#     root.mainloop() # Run the application
