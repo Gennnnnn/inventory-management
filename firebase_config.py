@@ -9,7 +9,7 @@ from firebase_admin import credentials, db
 
 # Load firebase credentials
 try:
-    cred = credentials.Certificate("serviceAccountKey.json")
+    cred = credentials.Certificate("inventory-management-349a9-872e51942446.json")
     firebase_admin.initialize_app(cred, {
         "databaseURL": "https://inventory-management-349a9-default-rtdb.firebaseio.com/"
     })
